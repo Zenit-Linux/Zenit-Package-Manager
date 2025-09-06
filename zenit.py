@@ -1,4 +1,5 @@
 import sys
+import os
 import argparse
 from rich.console import Console
 from rich.panel import Panel
@@ -12,43 +13,39 @@ console = Console(highlight=True, style="bold white on black")
 
 class ZenitCLI:
     def __init__(self):
+        if os.geteuid() != 0:
+            console.print(Panel("[bold red]This program must be run as root. Please use sudo.[/bold red]", title="[bold red]Error[/bold red]", border_style="red"))
+            sys.exit(1)
+
         self.repo_manager = RepoManager()
+        self.repo_manager.update_cache()
         self.solver = Solver(self.repo_manager.repos)
         self.downloader = Downloader()
         self.installer = Installer()
         self.parser = argparse.ArgumentParser(prog="zenit", description="Zenit Package Manager")
         subparsers = self.parser.add_subparsers(dest="command")
 
-        # Update
         subparsers.add_parser("update", help="Update repository cache")
 
-        # Install
         install_parser = subparsers.add_parser("install", help="Install a package")
         install_parser.add_argument("package", help="Package name")
 
-        # Remove
         remove_parser = subparsers.add_parser("remove", help="Remove a package")
         remove_parser.add_argument("package", help="Package name")
 
-        # Search
         search_parser = subparsers.add_parser("search", help="Search for a package")
         search_parser.add_argument("package", help="Package name")
 
-        # List installed
         list_parser = subparsers.add_parser("list", help="List packages")
         list_parser.add_argument("type", choices=["installed"], help="Type of list")
 
-        # Upgrade
         subparsers.add_parser("upgrade", help="Upgrade the system")
 
-        # Dist-upgrade
         subparsers.add_parser("dist-upgrade", help="Full distribution upgrade")
 
-        # Repo commands
         repo_parser = subparsers.add_parser("repo", help="Manage repositories")
         repo_subparsers = repo_parser.add_subparsers(dest="repo_command")
 
-        # Repo add
         add_parser = repo_subparsers.add_parser("add", help="Add a repository")
         add_parser.add_argument("name", help="Repository name")
         add_parser.add_argument("url", help="Repository URL")
@@ -58,22 +55,17 @@ class ZenitCLI:
         add_parser.add_argument("--enabled", type=bool, default=True, help="Enabled")
         add_parser.add_argument("--description", default="", help="Description")
 
-        # Repo remove
-        remove_repo_parser = repo_subparsers.add_parser("remove", help="Remove a repository")
-        remove_repo_parser.add_argument("name", help="Repository name")
+        delete_parser = repo_subparsers.add_parser("delete", help="Delete a repository")
+        delete_parser.add_argument("name", help="Repository name")
 
-        # Repo list
         repo_subparsers.add_parser("list", help="List repositories")
 
-        # Repo enable
         enable_parser = repo_subparsers.add_parser("enable", help="Enable a repository")
         enable_parser.add_argument("name", help="Repository name")
 
-        # Repo disable
         disable_parser = repo_subparsers.add_parser("disable", help="Disable a repository")
         disable_parser.add_argument("name", help="Repository name")
 
-        # Help and ?
         subparsers.add_parser("help", help="Show available commands")
         subparsers.add_parser("?", help="Show available commands")
 
@@ -102,8 +94,8 @@ class ZenitCLI:
         elif args.command == "repo":
             if args.repo_command == "add":
                 self.repo_add(args.name, args.url, args.type, args.priority, args.gpgcheck, args.enabled, args.description)
-            elif args.repo_command == "remove":
-                self.repo_remove(args.name)
+            elif args.repo_command == "delete":
+                self.repo_delete(args.name)
             elif args.repo_command == "list":
                 self.repo_list()
             elif args.repo_command == "enable":
@@ -127,7 +119,7 @@ class ZenitCLI:
             ("upgrade", "Upgrade the system"),
             ("dist-upgrade", "Full distribution upgrade"),
             ("repo add <name> <url> [--options]", "Add a repository"),
-            ("repo remove <name>", "Remove a repository"),
+            ("repo delete <name>", "Delete a repository"),
             ("repo list", "List repositories"),
             ("repo enable <name>", "Enable a repository"),
             ("repo disable <name>", "Disable a repository"),
@@ -141,13 +133,14 @@ class ZenitCLI:
     def update(self):
         console.print(Panel("[bold cyan]Updating repository cache...[/bold cyan]", title="[bold blue]Zenit Update[/bold blue]", border_style="blue"))
         self.repo_manager.update_cache()
+        self.solver = Solver(self.repo_manager.repos)
 
     def install(self, package_name):
         console.print(Panel(f"[bold cyan]Installing package {package_name}...[/bold cyan]", title="[bold green]Zenit Install[/bold green]", border_style="green"))
         transaction = self.solver.resolve_dependencies(package_name, "install")
         if transaction:
-            for pkg in transaction.packages:
-                package_path = self.downloader.download_package(pkg.url, pkg.name)
+            for pkg in transaction.newsolvables():
+                package_path = self.downloader.download_package(pkg.lookup_location(), pkg.name)
                 if package_path and self.installer.verify_gpg(package_path):
                     self.installer.install_package(package_path, "install")
 
@@ -155,7 +148,7 @@ class ZenitCLI:
         console.print(Panel(f"[bold cyan]Removing package {package_name}...[/bold cyan]", title="[bold red]Zenit Remove[/bold red]", border_style="red"))
         transaction = self.solver.resolve_dependencies(package_name, "remove")
         if transaction:
-            for pkg in transaction.packages:
+            for pkg in transaction.newsolvables():
                 self.installer.install_package(pkg.name + ".rpm", "remove")
 
     def search(self, package_name):
@@ -165,10 +158,19 @@ class ZenitCLI:
         table.add_column("[bold green]Version[/bold green]")
         table.add_column("[bold magenta]Repository[/bold magenta]")
         table.add_column("[bold white]Description[/bold white]")
-        table.add_row(package_name, "1.2.3", "slowroll-oss", "Main package for testing")
-        table.add_row(f"{package_name}-devel", "1.2.3", "slowroll-oss", "Development package")
-        table.add_row(f"{package_name}-extra", "1.2.3", "slowroll-non-oss", "Additional features package")
-        console.print(table)
+
+        matches = self.solver.search_packages(package_name)
+        for pkg in matches:
+            table.add_row(
+                pkg.name,
+                f"{pkg.version}.{pkg.release}",
+                pkg.repo.name,
+                pkg.lookup_summary() or "No description available"
+            )
+        if not matches:
+            console.print("[bold yellow]No packages found.[/bold yellow]")
+        else:
+            console.print(table)
 
     def list_installed(self):
         console.print(Panel("[bold cyan]Listing installed packages...[/bold cyan]", title="[bold green]Zenit List[/bold green]", border_style="green"))
@@ -188,8 +190,8 @@ class ZenitCLI:
         self.repo_manager.update_cache()
         transaction = self.solver.resolve_dependencies(None, "upgrade")
         if transaction:
-            for pkg in transaction.packages:
-                package_path = self.downloader.download_package(pkg.url, pkg.name)
+            for pkg in transaction.newsolvables():
+                package_path = self.downloader.download_package(pkg.lookup_location(), pkg.name)
                 if package_path and self.installer.verify_gpg(package_path):
                     self.installer.install_package(package_path, "install")
         console.print(Panel("[bold green]System upgraded successfully.[/bold green]", title="[bold green]Success[/bold green]", border_style="green"))
@@ -213,11 +215,14 @@ class ZenitCLI:
             "description": description
         })
         console.print(Panel("[bold green]Repository added successfully.[/bold green]", title="[bold green]Success[/bold green]", border_style="green"))
+        self.repo_manager.update_cache()
+        self.solver = Solver(self.repo_manager.repos)
 
-    def repo_remove(self, name):
-        console.print(Panel(f"[bold cyan]Removing repository {name}...[/bold cyan]", title="[bold red]Zenit Repo Remove[/bold red]", border_style="red"))
+    def repo_delete(self, name):
+        console.print(Panel(f"[bold cyan]Deleting repository {name}...[/bold cyan]", title="[bold red]Zenit Repo Delete[/bold red]", border_style="red"))
         self.repo_manager.remove_repo(name)
-        console.print(Panel("[bold green]Repository removed successfully.[/bold green]", title="[bold green]Success[/bold green]", border_style="green"))
+        console.print(Panel("[bold green]Repository deleted successfully.[/bold green]", title="[bold green]Success[/bold green]", border_style="green"))
+        self.solver = Solver(self.repo_manager.repos)
 
     def repo_list(self):
         console.print(Panel("[bold cyan]Listing repositories...[/bold cyan]", title="[bold green]Zenit Repo List[/bold green]", border_style="green"))
@@ -235,11 +240,14 @@ class ZenitCLI:
         console.print(Panel(f"[bold cyan]Enabling repository {name}...[/bold cyan]", title="[bold green]Zenit Repo Enable[/bold green]", border_style="green"))
         self.repo_manager.enable_repo(name)
         console.print(Panel("[bold green]Repository enabled successfully.[/bold green]", title="[bold green]Success[/bold green]", border_style="green"))
+        self.repo_manager.update_cache()
+        self.solver = Solver(self.repo_manager.repos)
 
     def repo_disable(self, name):
-        console.print(Panel(f"[bold cyan]Disabling repository {name}...[/bold cyan]", title="[bold red]Zenit Repo Disable[/bold red]", border_style="red"))
+        console.print(Panel("[bold cyan]Disabling repository {name}...[/bold cyan]", title="[bold red]Zenit Repo Disable[/bold red]", border_style="red"))
         self.repo_manager.disable_repo(name)
         console.print(Panel("[bold green]Repository disabled successfully.[/bold green]", title="[bold green]Success[/bold green]", border_style="green"))
+        self.solver = Solver(self.repo_manager.repos)
 
 if __name__ == "__main__":
     cli = ZenitCLI()
