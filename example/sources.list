@@ -1,0 +1,64 @@
+{
+  "repos": [
+    {
+      "name": "slowroll-non-oss",
+      "url": "http://download.opensuse.org/slowroll/repo/non-oss/",
+      "type": "rpm-md",
+      "enabled": true,
+      "priority": 90,
+      "gpgcheck": true,
+      "mirrorlist": null,
+      "description": "Non-OSS packages for openSUSE Slowroll"
+    },
+    {
+      "name": "slowroll-oss",
+      "url": "http://download.opensuse.org/slowroll/repo/oss/",
+      "type": "rpm-md",
+      "enabled": true,
+      "priority": 100,
+      "gpgcheck": true,
+      "mirrorlist": null,
+      "description": "Main OSS repository for Slowroll"
+    },
+    {
+      "name": "slowroll-source-oss",
+      "url": "http://download.opensuse.org/source/slowroll/repo/oss/",
+      "type": "rpm-md",
+      "enabled": false,
+      "priority": 50,
+      "gpgcheck": true,
+      "mirrorlist": null,
+      "description": "Source packages repository"
+    },
+    {
+      "name": "slowroll-update-oss",
+      "url": "http://download.opensuse.org/update/slowroll/repo/oss/",
+      "type": "rpm-md",
+      "enabled": true,
+      "priority": 110,
+      "gpgcheck": true,
+      "mirrorlist": null,
+      "description": "Update repository for OSS packages"
+    },
+    {
+      "name": "slowroll-debug-oss",
+      "url": "http://download.opensuse.org/debug/slowroll/repo/oss/",
+      "type": "rpm-md",
+      "enabled": false,
+      "priority": 10,
+      "gpgcheck": true,
+      "mirrorlist": null,
+      "description": "Debug packages repository"
+    },
+    {
+      "name": "openh264-codecs",
+      "url": "http://codecs.opensuse.org/openh264/openSUSE_Tumbleweed/",
+      "type": "rpm-md",
+      "enabled": true,
+      "priority": 80,
+      "gpgcheck": true,
+      "mirrorlist": null,
+      "description": "OpenH264 codecs repository"
+    }
+  ]
+}
