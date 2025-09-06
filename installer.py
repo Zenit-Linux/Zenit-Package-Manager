@@ -11,12 +11,16 @@ class Installer:
         self.gpg = gnupg.GPG()
 
     def verify_gpg(self, package_path):
-        result = self.gpg.verify_file(open(package_path, "rb"))
-        if result.valid:
-            console.print(f"[bold green]GPG signature verified for {package_path}[/bold green]")
-            return True
-        console.print(Panel(f"[bold red]Invalid GPG signature for {package_path}[/bold red]", title="[bold red]Error[/bold red]", border_style="red"))
-        return False
+        try:
+            result = self.gpg.verify_file(open(package_path, "rb"))
+            if result.valid:
+                console.print(f"[bold green]GPG signature verified for {package_path}[/bold green]")
+                return True
+            console.print(Panel(f"[bold red]Invalid GPG signature for {package_path}[/bold red]", title="[bold red]Error[/bold red]", border_style="red"))
+            return False
+        except Exception as e:
+            console.print(Panel(f"[bold red]Error verifying GPG for {package_path}: {e}[/bold red]", title="[bold red]Error[/bold red]", border_style="red"))
+            return False
 
     def install_package(self, package_path, action="install"):
         try:
