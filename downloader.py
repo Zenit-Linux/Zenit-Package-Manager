@@ -9,6 +9,9 @@ console = Console(highlight=True, style="bold white on black")
 class Downloader:
     def download_package(self, package_url, package_name):
         try:
+            # Ensure the URL is valid
+            if not package_url.startswith(('http://', 'https://')):
+                raise ValueError(f"Invalid URL scheme for {package_url}")
             response = requests.get(package_url, stream=True, timeout=10)
             response.raise_for_status()
             total_size = int(response.headers.get('content-length', 0))
