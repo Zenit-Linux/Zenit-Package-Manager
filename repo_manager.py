@@ -6,6 +6,7 @@ from jsonschema import validate
 from rich.console import Console
 from rich.progress import Progress, BarColumn, TextColumn, TimeRemainingColumn, TaskProgressColumn, SpinnerColumn
 from rich.panel import Panel
+import sys
 
 console = Console(highlight=True, style="bold white on black")
 
@@ -89,7 +90,6 @@ class RepoManager:
             console.print(Panel("[bold green]Repository metadata updated successfully.[/bold green]", title="[bold green]Success[/bold green]", border_style="green"))
 
     def download_metadata(self, repo):
-        # Download repomd.xml
         try:
             url = f"{repo['url']}repodata/repomd.xml"
             response = requests.get(url, timeout=30)
@@ -103,8 +103,6 @@ class RepoManager:
         except Exception as e:
             console.print(f"[bold red]Error downloading repomd.xml for {repo['name']}: {e}[/bold red]")
             return False
-
-        # Parse repomd.xml to get locations of primary, filelists, other
         all_files_downloaded = True
         try:
             tree = ET.parse(repomd_path)
@@ -126,7 +124,6 @@ class RepoManager:
         except Exception as e:
             console.print(f"[bold red]Error parsing or downloading additional metadata for {repo['name']}: {e}[/bold red]")
             all_files_downloaded = False
-
         return all_files_downloaded
 
     def add_repo(self, new_repo):
