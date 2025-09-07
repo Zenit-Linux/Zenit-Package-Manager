@@ -8,6 +8,7 @@ from repo_manager import RepoManager
 from solver import Solver
 from downloader import Downloader
 from installer import Installer
+import solv
 
 console = Console(highlight=True, style="bold white on black")
 
@@ -16,7 +17,6 @@ class ZenitCLI:
         if os.geteuid() != 0:
             console.print(Panel("[bold red]This program must be run as root. Please use sudo.[/bold red]", title="[bold red]Error[/bold red]", border_style="red"))
             sys.exit(1)
-
         self.repo_manager = RepoManager()
         self.repo_manager.update_cache()
         self.solver = Solver(self.repo_manager.repos)
@@ -24,28 +24,19 @@ class ZenitCLI:
         self.installer = Installer()
         self.parser = argparse.ArgumentParser(prog="zenit", description="Zenit Package Manager")
         subparsers = self.parser.add_subparsers(dest="command")
-
         subparsers.add_parser("update", help="Update repository cache")
-
         install_parser = subparsers.add_parser("install", help="Install a package")
         install_parser.add_argument("package", help="Package name")
-
         remove_parser = subparsers.add_parser("remove", help="Remove a package")
         remove_parser.add_argument("package", help="Package name")
-
         search_parser = subparsers.add_parser("search", help="Search for a package")
         search_parser.add_argument("package", help="Package name")
-
         list_parser = subparsers.add_parser("list", help="List packages")
         list_parser.add_argument("type", choices=["installed"], help="Type of list")
-
         subparsers.add_parser("upgrade", help="Upgrade the system")
-
         subparsers.add_parser("dist-upgrade", help="Full distribution upgrade")
-
         repo_parser = subparsers.add_parser("repo", help="Manage repositories")
         repo_subparsers = repo_parser.add_subparsers(dest="repo_command")
-
         add_parser = repo_subparsers.add_parser("add", help="Add a repository")
         add_parser.add_argument("name", help="Repository name")
         add_parser.add_argument("url", help="Repository URL")
@@ -54,18 +45,13 @@ class ZenitCLI:
         add_parser.add_argument("--gpgcheck", type=bool, default=True, help="GPG check")
         add_parser.add_argument("--enabled", type=bool, default=True, help="Enabled")
         add_parser.add_argument("--description", default="", help="Description")
-
         delete_parser = repo_subparsers.add_parser("delete", help="Delete a repository")
         delete_parser.add_argument("name", help="Repository name")
-
         repo_subparsers.add_parser("list", help="List repositories")
-
         enable_parser = repo_subparsers.add_parser("enable", help="Enable a repository")
         enable_parser.add_argument("name", help="Repository name")
-
         disable_parser = repo_subparsers.add_parser("disable", help="Disable a repository")
         disable_parser.add_argument("name", help="Repository name")
-
         subparsers.add_parser("help", help="Show available commands")
         subparsers.add_parser("?", help="Show available commands")
 
@@ -74,7 +60,6 @@ class ZenitCLI:
         if not args.command:
             self.show_help()
             return
-
         if args.command in ["help", "?"]:
             self.show_help()
         elif args.command == "update":
@@ -140,7 +125,14 @@ class ZenitCLI:
         transaction = self.solver.resolve_dependencies(package_name, "install")
         if transaction:
             for pkg in transaction.newsolvables():
-                package_path = self.downloader.download_package(pkg.lookup_location(), pkg.name)
+                # Construct full URL using repo base URL and package location
+                repo_url = self.solver.repo_urls.get(pkg.repo.name, "")
+                package_location = pkg.lookup_location()
+                if not package_location:
+                    console.print(Panel(f"[bold red]No location found for package {pkg.name}[/bold red]", title="[bold red]Error[/bold red]", border_style="red"))
+                    continue
+                full_url = f"{repo_url.rstrip('/')}/{package_location.lstrip('/')}"
+                package_path = self.downloader.download_package(full_url, pkg.name)
                 if package_path and self.installer.verify_gpg(package_path):
                     self.installer.install_package(package_path, "install")
 
@@ -148,8 +140,13 @@ class ZenitCLI:
         console.print(Panel(f"[bold cyan]Removing package {package_name}...[/bold cyan]", title="[bold red]Zenit Remove[/bold red]", border_style="red"))
         transaction = self.solver.resolve_dependencies(package_name, "remove")
         if transaction:
-            for pkg in transaction.newsolvables():
-                self.installer.install_package(pkg.name + ".rpm", "remove")
+            # Process transaction steps to find packages to erase
+            for step in transaction.steps():
+                step_type = transaction.steptype(step, solv.Transaction.SOLVER_TRANSACTION_IGNORE)
+                if step_type == solv.Transaction.SOLVER_TRANSACTION_ERASE:
+                    pkg = transaction.pool.id2solvable(step)
+                    package_name = pkg.name
+                    self.installer.install_package(f"{package_name}.rpm", "remove")
 
     def search(self, package_name):
         console.print(Panel(f"[bold cyan]Searching for package {package_name}...[/bold cyan]", title="[bold yellow]Zenit Search[/bold yellow]", border_style="yellow"))
@@ -158,7 +155,6 @@ class ZenitCLI:
         table.add_column("[bold green]Version[/bold green]")
         table.add_column("[bold magenta]Repository[/bold magenta]")
         table.add_column("[bold white]Description[/bold white]")
-
         matches = self.solver.search_packages(package_name)
         for pkg in matches:
             table.add_row(
@@ -191,7 +187,13 @@ class ZenitCLI:
         transaction = self.solver.resolve_dependencies(None, "upgrade")
         if transaction:
             for pkg in transaction.newsolvables():
-                package_path = self.downloader.download_package(pkg.lookup_location(), pkg.name)
+                repo_url = self.solver.repo_urls.get(pkg.repo.name, "")
+                package_location = pkg.lookup_location()
+                if not package_location:
+                    console.print(Panel(f"[bold red]No location found for package {pkg.name}[/bold red]", title="[bold red]Error[/bold red]", border_style="red"))
+                    continue
+                full_url = f"{repo_url.rstrip('/')}/{package_location.lstrip('/')}"
+                package_path = self.downloader.download_package(full_url, pkg.name)
                 if package_path and self.installer.verify_gpg(package_path):
                     self.installer.install_package(package_path, "install")
         console.print(Panel("[bold green]System upgraded successfully.[/bold green]", title="[bold green]Success[/bold green]", border_style="green"))
@@ -244,7 +246,7 @@ class ZenitCLI:
         self.solver = Solver(self.repo_manager.repos)
 
     def repo_disable(self, name):
-        console.print(Panel("[bold cyan]Disabling repository {name}...[/bold cyan]", title="[bold red]Zenit Repo Disable[/bold red]", border_style="red"))
+        console.print(Panel(f"[bold cyan]Disabling repository {name}...[/bold cyan]", title="[bold red]Zenit Repo Disable[/bold red]", border_style="red"))
         self.repo_manager.disable_repo(name)
         console.print(Panel("[bold green]Repository disabled successfully.[/bold green]", title="[bold green]Success[/bold green]", border_style="green"))
         self.solver = Solver(self.repo_manager.repos)
