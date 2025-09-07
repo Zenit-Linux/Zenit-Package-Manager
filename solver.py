@@ -12,9 +12,12 @@ class Solver:
         self.pool.setarch()
         self.cache_dir = "/var/cache/zenit"
         self.repos = repos
+        self.repo_urls = {}  # Store repo URLs for package downloading
         for repo in self.repos:
             if repo["enabled"]:
-                self.add_repo(repo)
+                repo_handle = self.add_repo(repo)
+                if repo_handle:
+                    self.repo_urls[repo["name"]] = repo["url"]
 
     def add_repo(self, repo):
         repo_handle = self.pool.add_repo(repo["name"])
@@ -23,13 +26,14 @@ class Solver:
             console.print(Panel(f"[bold yellow]Warning: Metadata file {repomd_path} not found. Skipping repository {repo['name']}.[/bold yellow]", title="[bold yellow]Warning[/bold yellow]", border_style="yellow"))
             return None
         try:
-            with open(repomd_path, "rb") as f:
-                repo_handle.add_repomdxml(f, 0)
+            # Use solv.xfopen for compatibility with libsolv
+            f = solv.xfopen(repomd_path)
+            repo_handle.add_repomdxml(f, 0)
+            solv.xfclose(f)
             console.print(f"[bold blue]Added repomd.xml for {repo['name']} to solver[/bold blue]")
         except Exception as e:
             console.print(Panel(f"[bold red]Error adding repomd.xml for repository {repo['name']}: {e}[/bold red]", title="[bold red]Error[/bold red]", border_style="red"))
             return None
-
         # Parse repomd.xml to load primary, filelists, other
         try:
             tree = ET.parse(repomd_path)
@@ -44,12 +48,12 @@ class Solver:
                     if not os.path.exists(file_path):
                         console.print(f"[bold yellow]Warning: Metadata file {file_name} not found for {repo['name']}. Skipping.[/bold yellow]")
                         continue
-                    with open(file_path, "rb") as f:
-                        repo_handle.add_rpmmd(f, type_, 0)
+                    f = solv.xfopen(file_path)
+                    repo_handle.add_rpmmd(f, type_, 0)
+                    solv.xfclose(f)
                     console.print(f"[bold blue]Added {type_} metadata for {repo['name']} to solver[/bold blue]")
         except Exception as e:
             console.print(Panel(f"[bold red]Error loading additional metadata for {repo['name']}: {e}[/bold red]", title="[bold red]Error[/bold red]", border_style="red"))
-
         return repo_handle
 
     def search_packages(self, package_name):
@@ -63,12 +67,21 @@ class Solver:
         console.print(Panel(f"[bold yellow]Resolving dependencies for {action} {package_name or 'system'}...[/bold yellow]", title="[bold yellow]Solver[/bold yellow]", border_style="yellow"))
         self.pool.createwhatprovides()
         if action == "install":
-            job = self.pool.Job(solv.Job.SOLVER_INSTALL | solv.Job.SOLVER_SOLVABLE_NAME, package_name)
+            if not package_name:
+                console.print(Panel("[bold red]Package name required for install action.[/bold red]", title="[bold red]Error[/bold red]", border_style="red"))
+                return None
+            name_id = self.pool.str2id(package_name, 1)  # Convert package name to Id
+            job = self.pool.Job(solv.Job.SOLVER_INSTALL | solv.Job.SOLVER_SOLVABLE_NAME, name_id)
         elif action == "remove":
-            job = self.pool.Job(solv.Job.SOLVER_ERASE | solv.Job.SOLVER_SOLVABLE_NAME, package_name)
+            if not package_name:
+                console.print(Panel("[bold red]Package name required for remove action.[/bold red]", title="[bold red]Error[/bold red]", border_style="red"))
+                return None
+            name_id = self.pool.str2id(package_name, 1)  # Convert package name to Id
+            job = self.pool.Job(solv.Job.SOLVER_ERASE | solv.Job.SOLVER_SOLVABLE_NAME, name_id)
         elif action in ["upgrade", "dist-upgrade"]:
-            job = self.pool.Job(solv.Job.SOLVER_UPDATE, None)
+            job = self.pool.Job(solv.Job.SOLVER_UPDATE, 0)
         else:
+            console.print(Panel(f"[bold red]Invalid action: {action}[/bold red]", title="[bold red]Error[/bold red]", border_style="red"))
             return None
         solver = self.pool.Solver()
         problems = solver.solve([job])
