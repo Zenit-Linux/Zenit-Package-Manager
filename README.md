@@ -1,1 +1,1 @@
-# Zenit-Package-Manager
+# ZPM - Zenit Package Manager
